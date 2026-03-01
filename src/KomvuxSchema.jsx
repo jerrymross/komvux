@@ -32,7 +32,12 @@ const getWeekDates = (date) => {
 };
 
 const formatDate = (date) => date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
-const formatDateKey = (date) => date.toISOString().split('T')[0];
+const formatDateKey = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 
 const timeToPixels = (timeStr) => {
   const [h, m] = timeStr.split(':').map(Number);
