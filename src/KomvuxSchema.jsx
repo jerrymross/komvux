@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { getRedDays, getNameDay } from './swedishDays.js';
 
 // ============ UTILITIES ============
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -44,6 +45,9 @@ const timeToPixels = (timeStr) => {
   return ((h - TIME_START) + m / 60) * SLOT_HEIGHT;
 };
 
+// Helper: get student count from students array or legacy studentCount
+const getStudentCount = (cls) => cls?.students?.length || cls?.studentCount || 0;
+
 // Migrate old data format to new
 const migrateData = (data) => {
   const classes = (data.classes || []).map(cls => ({
@@ -54,7 +58,8 @@ const migrateData = (data) => {
     weeklySchedule: cls.weeklySchedule || (cls.scheduledDays || []).map(day => ({
       courseId: cls.courseIds?.[0] || '', day, startTime: '', endTime: ''
     })),
-    aplPeriods: cls.aplPeriods || []
+    aplPeriods: cls.aplPeriods || [],
+    students: cls.students || []
   }));
   return { ...data, classes };
 };
@@ -149,8 +154,83 @@ const resolveOverlaps = (entries) => {
   return result;
 };
 
+// ============ LOGIN SCREEN ============
+function LoginScreen({ onLogin }) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (code === 'Kanelbulle123') {
+      sessionStorage.setItem('bageri-auth', 'true');
+      onLogin();
+    } else {
+      setError(true);
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif'
+    }}>
+      <div style={{
+        backgroundColor: 'rgba(255,255,255,0.95)', backdropFilter: 'saturate(180%) blur(20px)',
+        borderRadius: '24px', padding: '48px 40px', width: '380px',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', textAlign: 'center',
+        animation: shake ? 'shake 0.5s ease' : 'none'
+      }}>
+        <div style={{
+          width: '64px', height: '64px', background: 'linear-gradient(135deg, #007AFF, #5856D6)',
+          borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'white', fontWeight: '700', fontSize: '28px', margin: '0 auto 20px'
+        }}>B</div>
+        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#1d1d1f', letterSpacing: '-0.5px', marginBottom: '6px' }}>Bageri Schema</h1>
+        <p style={{ color: '#86868b', fontSize: '14px', marginBottom: '32px' }}>Ange kod för att logga in</p>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={code}
+            onChange={(e) => { setCode(e.target.value); setError(false); }}
+            placeholder="Ange kod..."
+            autoFocus
+            style={{
+              width: '100%', padding: '14px 18px', borderRadius: '12px', border: `2px solid ${error ? '#FF3B30' : 'rgba(0,0,0,0.08)'}`,
+              backgroundColor: error ? 'rgba(255,59,48,0.04)' : '#f5f5f7', color: '#1d1d1f',
+              fontSize: '16px', outline: 'none', boxSizing: 'border-box',
+              transition: 'border-color 0.2s ease, background-color 0.2s ease'
+            }}
+          />
+          {error && <p style={{ color: '#FF3B30', fontSize: '13px', marginTop: '8px', fontWeight: '500' }}>Fel kod. Försök igen.</p>}
+          <button type="submit" style={{
+            width: '100%', padding: '14px', borderRadius: '12px', border: 'none',
+            background: 'linear-gradient(135deg, #007AFF, #5856D6)', color: 'white',
+            fontSize: '16px', fontWeight: '600', cursor: 'pointer', marginTop: '16px',
+            transition: 'opacity 0.2s ease', letterSpacing: '-0.2px'
+          }}>Logga in</button>
+        </form>
+      </div>
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-10px); }
+          40% { transform: translateX(10px); }
+          60% { transform: translateX(-6px); }
+          80% { transform: translateX(6px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ============ MAIN APP ============
 export default function KomvuxSchema() {
+  const [loggedIn, setLoggedIn] = useState(sessionStorage.getItem('bageri-auth') === 'true');
   const [darkMode, setDarkMode] = useState(false);
   const [activeView, setActiveView] = useState('today');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -164,6 +244,12 @@ export default function KomvuxSchema() {
 
   const [modal, setModal] = useState({ type: null, data: null });
   const [loaded, setLoaded] = useState(false);
+
+  // Cache red days for visible years
+  const redDays = useMemo(() => {
+    const year = currentDate.getFullYear();
+    return { ...getRedDays(year - 1), ...getRedDays(year), ...getRedDays(year + 1) };
+  }, [currentDate]);
 
   // Load/Save localStorage
   useEffect(() => {
@@ -189,7 +275,7 @@ export default function KomvuxSchema() {
   const getScheduleForDate = (date) => getEffectiveScheduleForDate(date, classes, schedule);
   const getStudentsForDate = (date) => getScheduleForDate(date).reduce((sum, e) => {
     const cls = classes.find(c => c.id === e.classId);
-    return sum + (cls?.studentCount || 0);
+    return sum + getStudentCount(cls);
   }, 0);
   const hasConflict = (date) => {
     const entries = getScheduleForDate(date);
@@ -250,14 +336,18 @@ export default function KomvuxSchema() {
     { id: 'manage', label: 'Hantera', icon: '⚙' }
   ];
 
+  if (!loggedIn) {
+    return <LoginScreen onLogin={() => setLoggedIn(true)} />;
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: theme.bg, color: theme.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif", WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' }}>
       {/* Header — frosted glass */}
       <header style={{ backgroundColor: theme.bgCard, backdropFilter: theme.glass, WebkitBackdropFilter: theme.glass, borderBottom: `0.5px solid ${theme.border}`, padding: '12px 24px', position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: '1400px', margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '32px', height: '32px', background: 'linear-gradient(135deg, #007AFF, #5856D6)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '600', fontSize: '15px' }}>S</div>
-            <h1 style={{ fontSize: '18px', fontWeight: '600', letterSpacing: '-0.3px' }}>Komvux Schema</h1>
+            <div style={{ width: '32px', height: '32px', background: 'linear-gradient(135deg, #007AFF, #5856D6)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '600', fontSize: '15px' }}>B</div>
+            <h1 style={{ fontSize: '18px', fontWeight: '600', letterSpacing: '-0.3px' }}>Bageri Schema</h1>
           </div>
 
           <nav style={{ display: 'flex', gap: '2px', backgroundColor: theme.bgHover, borderRadius: '10px', padding: '3px' }}>
@@ -289,16 +379,16 @@ export default function KomvuxSchema() {
       {/* Main Content */}
       <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
         {activeView === 'today' && (
-          <TodayView date={new Date()} schedule={getScheduleForDate(new Date())} classes={classes} courses={courses} todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} theme={theme} onAddLesson={() => setModal({ type: 'schedule', data: new Date() })} />
+          <TodayView date={new Date()} schedule={getScheduleForDate(new Date())} classes={classes} courses={courses} todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} theme={theme} redDays={redDays} onAddLesson={() => setModal({ type: 'schedule', data: new Date() })} />
         )}
         {activeView === 'week' && (
-          <WeekView currentDate={currentDate} setCurrentDate={setCurrentDate} getScheduleForDate={getScheduleForDate} classes={classes} courses={courses} theme={theme} onDayClick={(d) => { setSelectedDate(d); setActiveView('day'); }} onAddLesson={(d) => setModal({ type: 'schedule', data: d })} />
+          <WeekView currentDate={currentDate} setCurrentDate={setCurrentDate} getScheduleForDate={getScheduleForDate} classes={classes} courses={courses} theme={theme} redDays={redDays} onDayClick={(d) => { setSelectedDate(d); setActiveView('day'); }} onAddLesson={(d) => setModal({ type: 'schedule', data: d })} />
         )}
         {activeView === 'day' && (
-          <DayView date={selectedDate} setDate={setSelectedDate} schedule={getScheduleForDate(selectedDate)} setSchedule={setSchedule} classes={classes} courses={courses} todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} theme={theme} onAddLesson={() => setModal({ type: 'schedule', data: selectedDate })} />
+          <DayView date={selectedDate} setDate={setSelectedDate} schedule={getScheduleForDate(selectedDate)} setSchedule={setSchedule} classes={classes} courses={courses} todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} theme={theme} redDays={redDays} onAddLesson={() => setModal({ type: 'schedule', data: selectedDate })} />
         )}
         {activeView === 'month' && (
-          <MonthView currentDate={currentDate} setCurrentDate={setCurrentDate} getScheduleForDate={getScheduleForDate} classes={classes} courses={courses} theme={theme} onDayClick={(d) => { setSelectedDate(d); setActiveView('day'); }} />
+          <MonthView currentDate={currentDate} setCurrentDate={setCurrentDate} getScheduleForDate={getScheduleForDate} classes={classes} courses={courses} theme={theme} redDays={redDays} onDayClick={(d) => { setSelectedDate(d); setActiveView('day'); }} />
         )}
         {activeView === 'manage' && (
           <ManageView courses={courses} setCourses={setCourses} classes={classes} setClasses={setClasses} theme={theme} getLessonCount={getLessonCount} setModal={setModal} />
@@ -334,16 +424,21 @@ export default function KomvuxSchema() {
 }
 
 // ============ TODAY VIEW ============
-function TodayView({ date, schedule, classes, courses, todos, setTodos, notes, setNotes, theme, onAddLesson }) {
+function TodayView({ date, schedule, classes, courses, todos, setTodos, notes, setNotes, theme, redDays, onAddLesson }) {
   const dateKey = formatDateKey(date);
-  const totalStudents = schedule.reduce((sum, e) => sum + (classes.find(c => c.id === e.classId)?.studentCount || 0), 0);
+  const totalStudents = schedule.reduce((sum, e) => sum + getStudentCount(classes.find(c => c.id === e.classId)), 0);
   const aplToday = getAplForDate(date, classes);
+  const holiday = redDays[dateKey];
+  const nameDay = getNameDay(date);
 
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <div style={{ background: 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)', borderRadius: '20px', padding: '36px', color: 'white', marginBottom: '28px', boxShadow: '0 8px 30px rgba(0, 122, 255, 0.25)' }}>
+      <div style={{ background: holiday ? 'linear-gradient(135deg, #FF3B30 0%, #FF6B6B 100%)' : 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)', borderRadius: '20px', padding: '36px', color: 'white', marginBottom: '28px', boxShadow: holiday ? '0 8px 30px rgba(255, 59, 48, 0.25)' : '0 8px 30px rgba(0, 122, 255, 0.25)' }}>
         <p style={{ opacity: 0.7, textTransform: 'capitalize', fontSize: '15px', fontWeight: '400', letterSpacing: '0.3px' }}>{date.toLocaleDateString('sv-SE', { weekday: 'long' })}</p>
-        <h2 style={{ fontSize: '34px', fontWeight: '700', margin: '6px 0 20px', letterSpacing: '-0.5px' }}>{date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+        <h2 style={{ fontSize: '34px', fontWeight: '700', margin: '6px 0 8px', letterSpacing: '-0.5px' }}>{date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+        {holiday && <p style={{ fontSize: '15px', fontWeight: '500', opacity: 0.9, marginBottom: '4px' }}>{holiday}</p>}
+        {nameDay && <p style={{ fontSize: '13px', opacity: 0.6, marginBottom: '12px' }}>{nameDay}</p>}
+        {!holiday && !nameDay && <div style={{ marginBottom: '12px' }} />}
         <div style={{ display: 'flex', gap: '32px' }}>
           <div><p style={{ opacity: 0.65, fontSize: '13px', fontWeight: '500', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Lektioner</p><p style={{ fontSize: '28px', fontWeight: '700', marginTop: '2px' }}>{schedule.length}</p></div>
           <div><p style={{ opacity: 0.65, fontSize: '13px', fontWeight: '500', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Elever</p><p style={{ fontSize: '28px', fontWeight: '700', marginTop: '2px' }}>{totalStudents}</p></div>
@@ -367,7 +462,7 @@ function TodayView({ date, schedule, classes, courses, todos, setTodos, notes, s
 }
 
 // ============ WEEK VIEW (TIDSGRID) ============
-function WeekView({ currentDate, setCurrentDate, getScheduleForDate, classes, courses, theme, onDayClick, onAddLesson }) {
+function WeekView({ currentDate, setCurrentDate, getScheduleForDate, classes, courses, theme, redDays, onDayClick, onAddLesson }) {
   const weekDates = getWeekDates(currentDate);
   const weekNum = getWeekNumber(currentDate);
   const totalHours = TIME_END - TIME_START;
@@ -398,14 +493,18 @@ function WeekView({ currentDate, setCurrentDate, getScheduleForDate, classes, co
           <div style={{ padding: '14px 8px', textAlign: 'center', fontSize: '11px', color: theme.textMuted }} />
           {weekDates.map((date, idx) => {
             const isToday = formatDateKey(date) === formatDateKey(new Date());
+            const holiday = redDays[formatDateKey(date)];
+            const nameDay = getNameDay(date);
             return (
               <div key={idx} onClick={() => onDayClick(date)} style={{
                 padding: '14px 8px', textAlign: 'center', cursor: 'pointer',
                 borderLeft: `0.5px solid ${theme.border}`,
-                backgroundColor: 'transparent'
+                backgroundColor: holiday ? 'rgba(255,59,48,0.04)' : 'transparent'
               }}>
-                <p style={{ fontWeight: '600', fontSize: '13px', color: isToday ? theme.accent : theme.textMuted, letterSpacing: '-0.1px' }}>{WEEKDAYS[idx]}</p>
-                <p style={{ fontSize: '22px', fontWeight: isToday ? '700' : '300', color: isToday ? theme.accent : theme.text, marginTop: '2px', letterSpacing: '-0.5px' }}>{date.getDate()}</p>
+                <p style={{ fontWeight: '600', fontSize: '13px', color: isToday ? theme.accent : holiday ? '#FF3B30' : theme.textMuted, letterSpacing: '-0.1px' }}>{WEEKDAYS[idx]}</p>
+                <p style={{ fontSize: '22px', fontWeight: isToday ? '700' : '300', color: isToday ? theme.accent : holiday ? '#FF3B30' : theme.text, marginTop: '2px', letterSpacing: '-0.5px' }}>{date.getDate()}</p>
+                {holiday && <p style={{ fontSize: '9px', color: '#FF3B30', fontWeight: '600', marginTop: '2px', lineHeight: '1.2' }}>{holiday}</p>}
+                {!holiday && nameDay && <p style={{ fontSize: '9px', color: theme.textMuted, marginTop: '2px', opacity: 0.7, lineHeight: '1.2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameDay}</p>}
               </div>
             );
           })}
@@ -528,9 +627,11 @@ function WeekView({ currentDate, setCurrentDate, getScheduleForDate, classes, co
 }
 
 // ============ DAY VIEW ============
-function DayView({ date, setDate, schedule, setSchedule, classes, courses, todos, setTodos, notes, setNotes, theme, onAddLesson }) {
+function DayView({ date, setDate, schedule, setSchedule, classes, courses, todos, setTodos, notes, setNotes, theme, redDays, onAddLesson }) {
   const dateKey = formatDateKey(date);
   const aplToday = getAplForDate(date, classes);
+  const holiday = redDays[dateKey];
+  const nameDay = getNameDay(date);
 
   const navigate = (days) => {
     const d = new Date(date);
@@ -558,8 +659,10 @@ function DayView({ date, setDate, schedule, setSchedule, classes, courses, todos
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
         <NavButton theme={theme} onClick={() => navigate(-1)}>←</NavButton>
         <div style={{ textAlign: 'center' }}>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', textTransform: 'capitalize', letterSpacing: '-0.5px' }}>{date.toLocaleDateString('sv-SE', { weekday: 'long' })}</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', textTransform: 'capitalize', letterSpacing: '-0.5px', color: holiday ? '#FF3B30' : theme.text }}>{date.toLocaleDateString('sv-SE', { weekday: 'long' })}</h2>
           <p style={{ color: theme.textMuted, fontSize: '14px', marginTop: '2px' }}>{date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long' })}</p>
+          {holiday && <p style={{ color: '#FF3B30', fontSize: '13px', fontWeight: '600', marginTop: '4px' }}>{holiday}</p>}
+          {nameDay && <p style={{ color: theme.textMuted, fontSize: '12px', marginTop: '2px', opacity: 0.7 }}>{nameDay}</p>}
         </div>
         <NavButton theme={theme} onClick={() => navigate(1)}>→</NavButton>
       </div>
@@ -581,7 +684,7 @@ function DayView({ date, setDate, schedule, setSchedule, classes, courses, todos
 }
 
 // ============ MONTH VIEW ============
-function MonthView({ currentDate, setCurrentDate, getScheduleForDate, classes, courses, theme, onDayClick }) {
+function MonthView({ currentDate, setCurrentDate, getScheduleForDate, classes, courses, theme, redDays, onDayClick }) {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -617,15 +720,21 @@ function MonthView({ currentDate, setCurrentDate, getScheduleForDate, classes, c
             const isToday = formatDateKey(date) === formatDateKey(new Date());
             const daySchedule = getScheduleForDate(date);
             const aplClasses = getAplForDate(date, classes);
+            const holiday = redDays[formatDateKey(date)];
+            const nameDay = getNameDay(date);
+            const isRedDay = !!holiday || isWeekend;
 
             return (
               <div key={idx} onClick={() => !isWeekend && onDayClick(date)} style={{
-                padding: '8px', borderRadius: '12px', minHeight: '70px', cursor: isWeekend ? 'default' : 'pointer',
-                backgroundColor: isToday ? theme.accent : aplClasses.length > 0 ? `${theme.apl}08` : 'transparent',
+                padding: '8px', borderRadius: '12px', minHeight: '78px', cursor: isWeekend ? 'default' : 'pointer',
+                backgroundColor: isToday ? theme.accent : holiday && !isWeekend ? 'rgba(255,59,48,0.06)' : aplClasses.length > 0 ? `${theme.apl}08` : 'transparent',
                 color: isToday ? 'white' : isWeekend ? theme.textMuted : theme.text,
                 opacity: isWeekend ? 0.4 : 1, transition: 'background-color 0.15s ease'
               }}>
-                <div style={{ fontWeight: isToday ? '700' : '400', marginBottom: '4px', fontSize: '15px' }}>{date.getDate()}</div>
+                <div style={{ fontWeight: isToday ? '700' : '400', marginBottom: '2px', fontSize: '15px', color: isToday ? 'white' : holiday && !isWeekend ? '#FF3B30' : undefined }}>{date.getDate()}</div>
+                {nameDay && !isWeekend && (
+                  <p style={{ fontSize: '8px', color: isToday ? 'rgba(255,255,255,0.7)' : theme.textMuted, lineHeight: '1.2', marginBottom: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.8 }}>{holiday || nameDay}</p>
+                )}
                 {aplClasses.length > 0 && !isWeekend && (
                   <div style={{ width: '100%', height: '4px', borderRadius: '2px', backgroundColor: theme.apl, marginBottom: '2px', border: `1px dashed ${theme.apl}` }} />
                 )}
@@ -671,7 +780,7 @@ function ManageView({ courses, setCourses, classes, setClasses, theme, getLesson
 
             return (
               <ItemCard key={cls.id} theme={theme} title={cls.name}
-                subtitle={`${cls.studentCount || 0} elever • ${weeklySlots} lektioner/vecka • ~${getLessonCount(cls.id)} totalt`}
+                subtitle={`${getStudentCount(cls)} elever • ${weeklySlots} lektioner/vecka • ~${getLessonCount(cls.id)} totalt`}
                 extra={
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }}>
                     {activeCourses.length > 0 && (
@@ -748,20 +857,38 @@ function ClassModal({ cls, courses, theme, onClose, onSave }) {
     coursePlan: cls?.coursePlan || [],
     weeklySchedule: cls?.weeklySchedule || [],
     aplPeriods: cls?.aplPeriods || [],
+    students: cls?.students || [],
   });
+  const [newStudentName, setNewStudentName] = useState('');
 
   const handleSave = () => {
     if (!form.name.trim()) return;
     const derived = {
       ...form,
+      studentCount: form.students.length,
       courseIds: [...new Set(form.coursePlan.map(cp => cp.courseId).filter(Boolean))],
       scheduledDays: [...new Set(form.weeklySchedule.map(ws => ws.day))].sort()
     };
     onSave({ ...cls, ...derived });
   };
 
+  const addStudent = () => {
+    if (!newStudentName.trim()) return;
+    setForm(prev => ({ ...prev, students: [...prev.students, { id: generateId(), name: newStudentName.trim() }] }));
+    setNewStudentName('');
+  };
+
+  const removeStudent = (id) => {
+    setForm(prev => ({ ...prev, students: prev.students.filter(s => s.id !== id) }));
+  };
+
+  const updateStudentName = (id, name) => {
+    setForm(prev => ({ ...prev, students: prev.students.map(s => s.id === id ? { ...s, name } : s) }));
+  };
+
   const tabs = [
     { id: 'info', label: 'Grundinfo' },
+    { id: 'students', label: `Elever (${form.students.length})` },
     { id: 'plan', label: 'Utbildningsplan' },
     { id: 'weekly', label: 'Veckoschema' },
     { id: 'apl', label: 'APL' },
@@ -793,8 +920,46 @@ function ClassModal({ cls, courses, theme, onClose, onSave }) {
       {tab === 'info' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <Input label="Klassnamn" value={form.name} onChange={v => setForm({ ...form, name: v })} theme={theme} placeholder="t.ex. Grupp A" />
-          <Input label="Antal elever" type="number" value={form.studentCount} onChange={v => setForm({ ...form, studentCount: parseInt(v) || 0 })} theme={theme} />
+          <div>
+            <label style={{ fontSize: '12px', color: theme.textMuted, display: 'block', marginBottom: '6px', fontWeight: '500' }}>Antal elever</label>
+            <p style={{ fontSize: '15px', fontWeight: '600', color: theme.text }}>{form.students.length} elever</p>
+            <p style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Hantera elever i fliken "Elever"</p>
+          </div>
           <Textarea label="Anteckningar" value={form.notes} onChange={v => setForm({ ...form, notes: v })} theme={theme} placeholder="Valfria anteckningar..." />
+        </div>
+      )}
+
+      {/* Tab: Elever */}
+      {tab === 'students' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {form.students.length === 0 && (
+            <p style={{ color: theme.textMuted, textAlign: 'center', padding: '24px', fontSize: '14px' }}>Inga elever tillagda ännu</p>
+          )}
+          {form.students.map((student, idx) => (
+            <div key={student.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: theme.textMuted, width: '24px', textAlign: 'right', flexShrink: 0 }}>{idx + 1}.</span>
+              <input
+                type="text"
+                value={student.name}
+                onChange={(e) => updateStudentName(student.id, e.target.value)}
+                style={{ ...inputStyle, flex: 1 }}
+                placeholder="Elevnamn"
+              />
+              <button onClick={() => removeStudent(student.id)} style={{ padding: '6px 10px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: '16px', transition: 'color 0.15s ease' }}>×</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: `0.5px solid ${theme.border}` }}>
+            <input
+              type="text"
+              value={newStudentName}
+              onChange={(e) => setNewStudentName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addStudent(); }}
+              style={{ ...inputStyle, flex: 1 }}
+              placeholder="Skriv elevnamn..."
+            />
+            <button onClick={addStudent} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', backgroundColor: theme.accent, color: 'white', cursor: 'pointer', fontWeight: '500', fontSize: '13px', transition: 'opacity 0.15s ease', whiteSpace: 'nowrap' }}>+ Lägg till</button>
+          </div>
+          <p style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Tryck Enter eller klicka "Lägg till" för att lägga till en elev</p>
         </div>
       )}
 
@@ -1178,7 +1343,7 @@ function LessonCard({ entry, dateKey, classes, courses, todos, setTodos, notes, 
         <div>
           <h3 style={{ fontSize: '17px', fontWeight: '600', letterSpacing: '-0.2px' }}>{cls?.name || 'Okänd klass'}</h3>
           <p style={{ color: theme.textMuted, fontSize: '13px', marginTop: '2px' }}>
-            {course?.name || 'Ingen kurs'} • {cls?.studentCount || 0} elever
+            {course?.name || 'Ingen kurs'} • {getStudentCount(cls)} elever
             {entry.startTime && ` • ${entry.startTime}–${entry.endTime}`}
           </p>
           {entry.isAuto && <span style={{ fontSize: '10px', color: theme.accent, fontWeight: '600', letterSpacing: '0.5px', textTransform: 'uppercase' }}>AUTO</span>}
