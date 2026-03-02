@@ -1020,64 +1020,98 @@ function ClassModal({ cls, courses, theme, onClose, onSave }) {
 
       {/* Tab: Veckoschema */}
       {tab === 'weekly' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <p style={{ fontSize: '13px', color: theme.textMuted }}>Definiera fasta lektioner per veckodag. Dessa repeteras automatiskt under kursens aktiva period.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <p style={{ fontSize: '13px', color: theme.textMuted }}>Välj vilka dagar varje kurs ska ha lektion. Kurserna hämtas från utbildningsplanen.</p>
 
-          {form.weeklySchedule.length === 0 && (
-            <p style={{ color: theme.textMuted, textAlign: 'center', padding: '16px', fontSize: '14px' }}>Inga lektioner i veckoschemat</p>
-          )}
-
-          {form.weeklySchedule.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 90px 90px 32px', gap: '8px', fontSize: '11px', color: theme.textMuted }}>
-              <span>Kurs</span><span>Dag</span><span>Start</span><span>Slut</span><span />
+          {form.coursePlan.filter(cp => cp.courseId).length === 0 && (
+            <div style={{ textAlign: 'center', padding: '24px' }}>
+              <p style={{ color: theme.textMuted, fontSize: '14px', marginBottom: '8px' }}>Inga kurser i utbildningsplanen</p>
+              <p style={{ color: theme.textMuted, fontSize: '12px' }}>Lägg till kurser i fliken "Utbildningsplan" först</p>
             </div>
           )}
 
-          {form.weeklySchedule.map((ws, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 90px 90px 32px', gap: '8px', alignItems: 'center' }}>
-              <select value={ws.courseId} onChange={e => {
-                const updated = [...form.weeklySchedule];
-                updated[idx] = { ...updated[idx], courseId: e.target.value };
-                setForm({ ...form, weeklySchedule: updated });
-              }} style={inputStyle}>
-                <option value="">Välj kurs...</option>
-                {courses.filter(c => form.coursePlan.some(cp => cp.courseId === c.id)).map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-                {courses.filter(c => !form.coursePlan.some(cp => cp.courseId === c.id)).map(c => (
-                  <option key={c.id} value={c.id}>{c.name} (ej i plan)</option>
-                ))}
-              </select>
-              <select value={ws.day} onChange={e => {
-                const updated = [...form.weeklySchedule];
-                updated[idx] = { ...updated[idx], day: parseInt(e.target.value) };
-                setForm({ ...form, weeklySchedule: updated });
-              }} style={inputStyle}>
-                {WEEKDAYS.map((d, i) => <option key={i} value={i}>{WEEKDAY_SHORT[i]}</option>)}
-              </select>
-              <input type="time" value={ws.startTime || ''} onChange={e => {
-                const updated = [...form.weeklySchedule];
-                updated[idx] = { ...updated[idx], startTime: e.target.value };
-                setForm({ ...form, weeklySchedule: updated });
-              }} style={inputStyle} />
-              <input type="time" value={ws.endTime || ''} onChange={e => {
-                const updated = [...form.weeklySchedule];
-                updated[idx] = { ...updated[idx], endTime: e.target.value };
-                setForm({ ...form, weeklySchedule: updated });
-              }} style={inputStyle} />
-              <button onClick={() => setForm({ ...form, weeklySchedule: form.weeklySchedule.filter((_, i) => i !== idx) })} style={{
-                padding: '6px', border: 'none', backgroundColor: theme.warning, color: 'white',
-                borderRadius: '6px', cursor: 'pointer', fontSize: '14px'
-              }}>×</button>
-            </div>
-          ))}
+          {form.coursePlan.filter(cp => cp.courseId).map((cp) => {
+            const course = courses.find(c => c.id === cp.courseId);
+            if (!course) return null;
+            // Find existing weekly slots for this course
+            const courseSlots = form.weeklySchedule.filter(ws => ws.courseId === cp.courseId);
+            const activeDays = courseSlots.map(ws => ws.day);
+            // Get default time from first existing slot or fallback
+            const defaultStart = courseSlots[0]?.startTime || '08:00';
+            const defaultEnd = courseSlots[0]?.endTime || '10:00';
 
-          <button onClick={() => setForm({ ...form, weeklySchedule: [...form.weeklySchedule, { courseId: '', day: 0, startTime: '08:00', endTime: '10:00' }] })} style={{
-            padding: '10px', borderRadius: '10px', border: 'none',
-            backgroundColor: theme.bgHover, color: theme.accent, cursor: 'pointer', fontWeight: '500', fontSize: '13px', transition: 'all 0.15s ease'
-          }}>
-            + Lägg till lektion
-          </button>
+            const toggleDay = (dayIdx) => {
+              if (activeDays.includes(dayIdx)) {
+                // Remove this day
+                setForm(prev => ({
+                  ...prev,
+                  weeklySchedule: prev.weeklySchedule.filter(ws => !(ws.courseId === cp.courseId && ws.day === dayIdx))
+                }));
+              } else {
+                // Add this day with default times
+                setForm(prev => ({
+                  ...prev,
+                  weeklySchedule: [...prev.weeklySchedule, { courseId: cp.courseId, day: dayIdx, startTime: defaultStart, endTime: defaultEnd }]
+                }));
+              }
+            };
+
+            const updateSlotTime = (dayIdx, field, value) => {
+              setForm(prev => ({
+                ...prev,
+                weeklySchedule: prev.weeklySchedule.map(ws =>
+                  ws.courseId === cp.courseId && ws.day === dayIdx ? { ...ws, [field]: value } : ws
+                )
+              }));
+            };
+
+            return (
+              <div key={cp.courseId} style={{ backgroundColor: theme.bgHover, borderRadius: '14px', padding: '16px', borderLeft: `3px solid ${course.color || theme.accent}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: course.color || theme.accent, flexShrink: 0 }} />
+                  <span style={{ fontWeight: '600', fontSize: '14px' }}>{course.name}</span>
+                  <span style={{ fontSize: '11px', color: theme.textMuted, marginLeft: 'auto' }}>
+                    {cp.startDate && cp.endDate ? `${cp.startDate} — ${cp.endDate}` : 'Inga datum satta'}
+                  </span>
+                </div>
+
+                {/* Day toggles */}
+                <div style={{ display: 'flex', gap: '6px', marginBottom: activeDays.length > 0 ? '12px' : '0' }}>
+                  {WEEKDAYS.map((dayName, dayIdx) => {
+                    const isActive = activeDays.includes(dayIdx);
+                    return (
+                      <button key={dayIdx} onClick={() => toggleDay(dayIdx)} style={{
+                        flex: 1, padding: '8px 4px', borderRadius: '8px', border: 'none',
+                        backgroundColor: isActive ? (course.color || theme.accent) : theme.bgCardSolid,
+                        color: isActive ? 'white' : theme.textMuted,
+                        cursor: 'pointer', fontWeight: isActive ? '600' : '400', fontSize: '12px',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isActive ? 'none' : theme.shadow
+                      }}>
+                        {WEEKDAY_SHORT[dayIdx]}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Time settings per active day */}
+                {activeDays.sort((a, b) => a - b).map(dayIdx => {
+                  const slot = courseSlots.find(ws => ws.day === dayIdx);
+                  if (!slot) return null;
+                  return (
+                    <div key={dayIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '500', width: '32px', color: theme.textMuted }}>{WEEKDAY_SHORT[dayIdx]}</span>
+                      <input type="time" value={slot.startTime || ''} onChange={e => updateSlotTime(dayIdx, 'startTime', e.target.value)}
+                        style={{ ...inputStyle, flex: 1 }} />
+                      <span style={{ fontSize: '12px', color: theme.textMuted }}>—</span>
+                      <input type="time" value={slot.endTime || ''} onChange={e => updateSlotTime(dayIdx, 'endTime', e.target.value)}
+                        style={{ ...inputStyle, flex: 1 }} />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       )}
 
